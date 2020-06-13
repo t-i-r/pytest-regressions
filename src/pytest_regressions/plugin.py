@@ -99,3 +99,14 @@ def image_regression(datadir, original_datadir, request):
     from .image_regression import ImageRegressionFixture
 
     return ImageRegressionFixture(datadir, original_datadir, request)
+
+
+@pytest.fixture
+def df_regression(datadir, original_datadir, request):
+    """
+    Regression checks for data frames
+
+    """
+    from .df_regression import DataFrameRegressionFixture
+
+    return DataFrameRegressionFixture(datadir, original_datadir, request)

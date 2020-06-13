@@ -3,7 +3,7 @@ import pytest
 
 
 from pathlib import Path
-
+import pandas as pd
 
 def import_error_message(libname):
     return f"'{libname}' library is an optional dependency and must be installed explicitly when the fixture 'check' is used"
@@ -151,6 +151,109 @@ def perform_regression_check(
 
         try:
             check_fn(obtained_filename, filename)
+        except AssertionError:
+            if force_regen:
+                dump_fn(source_filename)
+                aux_created = dump_aux_fn(source_filename)
+                msg = make_location_message(
+                    "Files differ and --force-regen set, regenerating file at:",
+                    source_filename,
+                    aux_created,
+                )
+                pytest.fail(msg)
+            else:
+                dump_aux_fn(obtained_filename)
+                raise
+
+
+def perform_df_regression_check(
+    datadir,
+    original_datadir,
+    request,
+    check_fn,
+    dump_fn,
+    extension,
+    basename=None,
+    fullpath=None,
+    force_regen=False,
+    obtained_filename=None,
+    dump_aux_fn=lambda filename: [],
+):
+    """
+    First run of this check will generate a expected file. Following attempts will always try to
+    match obtained files with that expected file.
+
+    If expected file needs to be updated, just enable `force_regen` argument.
+
+    :param Path datadir: Fixture embed_data.
+    :param Path original_datadir: Fixture embed_data.
+    :param SubRequest request: Pytest request object.
+    :param callable check_fn: A function that receives as arguments, respectively, absolute path to
+        obtained file and absolute path to expected file. It must assert if contents of file match.
+        Function can safely assume that obtained file is already dumped and only care about
+        comparison.
+    :param callable dump_fn: A function that receive an absolute file path as argument. Implementor
+        must dump file in this path.
+    :param callable dump_aux_fn: A function that receives the same file path as ``dump_fn``, but may
+        dump additional files to help diagnose this regression later (for example dumping image of
+        3d views and plots to compare later). Must return the list of file names written (used to display).
+    :param str extension: Extension of files compared by this check.
+    :param bool force_regen: if true it will regenerate expected file.
+    :param str obtained_filename: complete path to use to write the obtained file. By
+        default will prepend `.obtained` before the file extension.
+    ..see: `data_regression.Check` for `basename` and `fullpath` arguments.
+    """
+    import re
+
+    assert not (basename and fullpath), "pass either basename or fullpath, but not both"
+
+    __tracebackhide__ = True
+
+    if basename is None:
+        basename = re.sub(r"[\W]", "_", request.node.name)
+
+    if fullpath:
+        filename = source_filename = Path(fullpath)
+    else:
+        filename = datadir / (basename + extension)
+        source_filename = original_datadir / (basename + extension)
+
+    def make_location_message(banner, filename, aux_files):
+        msg = [banner, f"- {filename}"]
+        if aux_files:
+            msg.append("Auxiliary:")
+            msg += [f"- {x}" for x in aux_files]
+        return "\n".join(msg)
+
+    force_regen = force_regen or request.config.getoption("force_regen")
+    if not filename.is_file():
+        source_filename.parent.mkdir(parents=True, exist_ok=True)
+        dump_fn(source_filename)
+        aux_created = dump_aux_fn(source_filename)
+
+        msg = make_location_message(
+            "File not found in data directory, created:", source_filename, aux_created
+        )
+        pytest.fail(msg)
+    else:
+        if obtained_filename is None:
+            if fullpath:
+                obtained_filename = (datadir / basename).with_suffix(
+                    ".obtained" + extension
+                )
+            else:
+                obtained_filename = filename.with_suffix(".obtained" + extension)
+
+        dump_fn(obtained_filename)
+
+        try:
+            #check_fn(obtained_filename, filename)
+            print ('comparing files')
+            df1 = pd.read_parquet(obtained_filename)
+            df2 = pd.read_parquet(filename)
+            
+            assert pd.testing.assert_frame_equal(df1, df2) is None 
+
         except AssertionError:
             if force_regen:
                 dump_fn(source_filename)
